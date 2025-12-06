@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Mapping — Fixed Export & Controls (v22 fixed)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial;background:#0a0a0a;color:#fff;padding-top:72px}
+    .top-bar{position:fixed;top:0;left:0;right:0;height:64px;background:#071018;display:flex;align-items:center;gap:12px;padding:10px 14px;z-index:1000}
+    .btn{padding:8px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);color:#fff;cursor:pointer}
+    .btn-danger{background:rgba(220,38,38,0.12);border-color:#dc2626;color:#fff}
+    .select,.input{padding:6px;border-radius:6px;background:rgba(255,255,255,0.03);color:#fff;border:1px solid rgba(255,255,255,0.06)}
+    .panel{position:fixed;left:12px;top:72px;background:rgba(10,10,10,0.95);padding:12px;border-radius:8px;width:460px;height:calc(100vh - 84px);overflow:auto;z-index:100}
+    #main-viewport{position:fixed;top:72px;left:492px;right:20px;bottom:20px;background:#081018;border-radius:6px;overflow:hidden;display:flex;align-items:flex-start;justify-content:center}
+    .preview-grid{position:absolute;bottom:12px;right:12px;display:grid;grid-template-columns:repeat(1,200px);gap:10px;z-index:30}
+    #miniLog{margin-top:8px;font-family:monospace;font-size:12px;color:#9ca3af;height:180px;overflow:auto;background:rgba(0,0,0,0.4);padding:8px;border-radius:6px}
+    .list-item{display:flex;justify-content:space-between;align-items:center;padding:6px;border-radius:6px}
+    .metrics input{width:80px;padding:6px;border-radius:6px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);color:#fff}
+    .top-right-controls{margin-left:auto;display:flex;gap:8px;align-items:center}
+  </style>
+</head>
+<body>
+  <div class="top-bar">
+    <div style="font-weight:800;color:#0dd6b6">Mapping — Fixed Export (v22 fixed)</div>
+    <button class="btn" onclick="uploadContent()">📁 Load content</button>
+
+    <label style="margin-left:8px">Resolution
+      <select id="exportRes" class="select">
+        <option value="preview">Preview</option>
+        <option value="1080p">FullHD (1920×1080)</option>
+        <option value="4k">4K (3840×2160)</option>
+      </select>
+    </label>
+
+    <button id="btnPlay" class="btn" onclick="togglePlay()">► Play</button>
+    <button id="recordBtn" class="btn btn-danger" onclick="toggleRecording()">🔴 Record</button>
+    <button class="btn" id="exportBtn" onclick="startExport()">⬇️ Export</button>
+
+    <div class="top-right-controls">
+      <label style="display:flex;align-items:center;gap:6px">
+        Orientation:
+        <select id="projOrient" class="select" title="Projector orientation (portrait / landscape)">
+          <option value="portrait">Portrait (9:16)</option>
+          <option value="landscape">Landscape (16:9)</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div class="panel" id="controls">
+    <h3 style="color:#0dd6b6;margin:0 0 6px 0">Scene & Export</h3>
+
+    <div style="margin-top:6px">
+      <label><input id="useProj" type="checkbox" checked/> Use projector</label>
+    </div>
+
+    <div style="margin-top:10px" class="transform-controls">
+      <button id="addBox" class="btn">Add Box</button>
+      <button id="addPlane" class="btn">Add Plane</button>
+      <button id="addSphere" class="btn">Add Sphere</button>
+    </div>
+
+    <div style="margin-top:12px">
+      <div style="font-weight:700;color:#0dd6b6;margin-bottom:6px">Scene contents</div>
+      <div style="font-size:12px;color:#9aaabb;margin-bottom:6px">Objects</div>
+      <div id="object-list" style="max-height:160px;overflow:auto"></div>
+
+      <div style="height:8px"></div>
+
+      <div style="font-size:12px;color:#9aaabb;margin-bottom:6px">Projector</div>
+      <div id="projector-list"></div>
+    </div>
+
+    <div style="margin-top:12px" class="metrics">
+      <div>Selected:</div>
+      <input id="metric-name" readonly placeholder="None" />
+      <div style="margin-top:8px">Pos (m) <input id="metric-x" /> <input id="metric-y" /> <input id="metric-z" /></div>
+      <div style="margin-top:8px">Rot (deg) <input id="metric-rotx" /> <input id="metric-roty" /> <input id="metric-rotz" /></div>
+      <div style="margin-top:8px"><button id="metric-apply" class="btn">Apply</button></div>
+    </div>
+
+    <div style="margin-top:12px">
+      <div style="font-weight:700;color:#0dd6b6;margin-bottom:6px">Log</div>
+      <div id="miniLog">mini-log...</div>
+    </div>
+  </div>
+
+  <div id="main-viewport">
+    <div class="preview-grid">
+      <div class="preview-screen">
+        <div style="position:absolute;left:6px;top:6px;background:rgba(13,148,136,0.9);padding:4px 8px;border-radius:6px;z-index:12;color:#fff">
+          Proj <button class="btn" onclick="downloadLast('proj')" style="margin-left:8px">DL</button>
+        </div>
+        <canvas id="preview1" style="width:200px;height:150px"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+
+  <script>
+  // v22 fixed: ensure projector orientation change updates projector camera, preview RT and viewer layout.
+  // Key fixes:
+  // - Added enterProjectorViewForProjector(p) to resize renderer to projector aspect when projector is active
+  // - setProjectorOrientation now updates p.camera, resizes p.rtPreview and preview canvas, updates viewer if that projector is selected/active
+  // - restored visible sphere marker (mark) for the projector (so it's visible in viewer)
+  // - orientation select moved to top-right (already present)
+
+  let scene, camera, renderer, cube, projectors = [], contentTexture = null, contentVideo = null;
+  const dpr = window.devicePixelRatio || 1;
+  const miniLogEl = () => document.getElementById('miniLog');
+  function miniLog(msg){ console.log(msg); const el = miniLogEl(); el.textContent += (el.textContent ? '\n' : '') + msg; el.scrollTop = el.scrollHeight; }
+
+  let orbit, transformControl;
+  let selected = null;
+  const interactiveObjects = [];
+  const primitives = [];
+  const projectionOverlays = new Map();
+
+  // ---- Helper: enter projector view (resize renderer to best-fit projector aspect) ----
+  function enterProjectorViewForProjector(p){
+    if (!p || !p.camera || !renderer) return;
+    const container = document.getElementById('main-viewport');
+    const availW = container.clientWidth;
+    const availH = container.clientHeight;
+    // projector aspect = width/height
+    const aspect = p.camera.aspect || (9/16);
+    // We'll target height = availH and width = height * aspect, but clamp to availW
+    let targetH = availH;
+    let targetW = Math.round(targetH * aspect);
+    if (targetW > availW){
+      targetW = availW;
+      targetH = Math.round(targetW / aspect);
+    }
+    renderer.setSize(targetW, targetH);
+    camera.aspect = targetW / targetH;
+    camera.updateProjectionMatrix();
+    renderer.domElement.style.margin = 'auto';
+    miniLog(`Viewer resized to projector aspect ${aspect.toFixed(3)} (${targetW}x${targetH})`);
+  }
+
+  // ---- setProjectorOrientation updated to also resize preview RT and viewer if needed ----
+  function setProjectorOrientation(p, mode){
+    if (!p || !p.camera) return;
+    p.orientation = mode;
+    p.camera.aspect = (mode === 'portrait') ? (9/16) : (16/9);
+    p.camera.updateProjectionMatrix();
+
+    // Resize preview RT and preview canvas to keep preview not squashed
+    try {
+      const previewCanvas = document.getElementById('preview1');
+      if (previewCanvas && p.rtPreview) {
+        // Keep preview width ~200 CSS pixels, compute height from aspect
+        const previewCssW = 200;
+        const previewWpx = Math.max(1, Math.floor(previewCssW * dpr));
+        const previewHpx = Math.max(1, Math.floor(previewWpx / p.camera.aspect));
+        p.rtPreview.setSize(previewWpx, previewHpx);
+        // Update canvas element pixel size and CSS height
+        previewCanvas.width = previewWpx;
+        previewCanvas.height = previewHpx;
+        previewCanvas.style.width = previewCssW + 'px';
+        previewCanvas.style.height = Math.round(previewHpx / dpr) + 'px';
+      }
+    } catch (err) {
+      console.warn('Preview RT resize failed', err);
+    }
+
+    // If this projector is selected, update the viewer layout to match orientation
+    if (selected && selected.type === 'projector' && selected.obj === p) {
+      // Choose to call enterProjectorViewForProjector to adapt the renderer to projector aspect
+      enterProjectorViewForProjector(p);
+    }
+
+    // Ensure overlays updated
+    updateProjectionOverlaysWithProjector(getActiveProjector());
+    miniLog(`${p.label || 'projector'} set to ${mode}`);
+  }
+
+  // ---- rest of file (kept similar to v22, with the above changes integrated) ----
+
+  function applyMetricsUI(){
+    if (!selected) { alert('No selection'); return; }
+    const x = parseFloat(document.getElementById('metric-x').value || '0');
+    const y = parseFloat(document.getElementById('metric-y').value || '0');
+    const z = parseFloat(document.getElementById('metric-z').value || '0');
+    const rx = THREE.Math.degToRad(parseFloat(document.getElementById('metric-rotx').value || '0'));
+    const ry = THREE.Math.degToRad(parseFloat(document.getElementById('metric-roty').value || '0'));
+    const rz = THREE.Math.degToRad(parseFloat(document.getElementById('metric-rotz').value || '0'));
+    if (selected.type === 'object'){
+      const m = selected.obj; m.position.set(x,y,z); m.quaternion.setFromEuler(new THREE.Euler(rx,ry,rz,'XYZ')); m.updateMatrixWorld();
+    } else {
+      const p = selected.obj; p.group.position.set(x,y,z); p.group.quaternion.setFromEuler(new THREE.Euler(rx,ry,rz,'XYZ')); p.group.updateMatrixWorld();
+      if (p.camera){ p.camera.position.copy(p.group.position); p.camera.quaternion.copy(p.group.quaternion); p.camera.updateProjectionMatrix && p.camera.updateProjectionMatrix(); }
+    }
+    transformControl.update && transformControl.update();
+    updateMetricsUI();
+  }
+
+  function removePrimitive(mesh){
+    try{
+      const overlay = projectionOverlays.get(mesh);
+      if (overlay){ overlay.parent && overlay.parent.remove(overlay); overlay.material && overlay.material.dispose(); projectionOverlays.delete(mesh); }
+      scene.remove(mesh);
+      mesh.geometry && mesh.geometry.dispose && mesh.geometry.dispose();
+      if (mesh.material) { if (Array.isArray(mesh.material)) mesh.material.forEach(m=>m.dispose && m.dispose()); else mesh.material.dispose && mesh.material.dispose(); }
+      const idx = primitives.indexOf(mesh); if (idx !== -1) primitives.splice(idx,1);
+      const ii = interactiveObjects.indexOf(mesh); if (ii !== -1) interactiveObjects.splice(ii,1);
+      mesh._listItem && mesh._listItem.remove();
+      transformControl.detach();
+      selected = null;
+      updateMetricsUI();
+      miniLog('Primitive removed');
+    } catch(e){ console.warn(e); }
+  }
+
+  function createProjectionOverlayMaterial(){
+    return new THREE.ShaderMaterial({
+      uniforms: { uProjMatrix: { value: new THREE.Matrix4() }, uProjTex: { value: contentTexture || new THREE.Texture() }, uProjStrength: { value: 1.0 } },
+      vertexShader: `uniform mat4 uProjMatrix; varying vec4 vProjPos; void main(){ vProjPos = uProjMatrix * modelMatrix * vec4(position,1.0); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+      fragmentShader: `uniform sampler2D uProjTex; uniform float uProjStrength; varying vec4 vProjPos; void main(){ vec3 proj = vProjPos.xyz / vProjPos.w; vec2 uv = proj.xy * 0.5 + 0.5; if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0||vProjPos.z<=0.0) discard; vec4 s = texture2D(uProjTex,uv); gl_FragColor = vec4(s.rgb, s.a * uProjStrength); }`,
+      transparent:true, depthTest:true, depthWrite:false, side:THREE.DoubleSide
+    });
+  }
+
+  function createProjectionOverlayForMesh(mesh){
+    if (!mesh || projectionOverlays.has(mesh)) return projectionOverlays.get(mesh);
+    const mat = createProjectionOverlayMaterial();
+    const overlay = new THREE.Mesh(mesh.geometry, mat);
+    overlay.frustumCulled = false; overlay.renderOrder = 999;
+    mesh.add(overlay); projectionOverlays.set(mesh, overlay); return overlay;
+  }
+
+  function updateProjectionTexOnOverlays(){
+    projectionOverlays.forEach(o => { if (o && o.material && o.material.uniforms) { o.material.uniforms.uProjTex.value = contentTexture || new THREE.Texture(); o.material.uniforms.uProjTex.needsUpdate = true; } });
+  }
+
+  function applyProjectionToScene(){ if (!contentTexture) return; createProjectionOverlayForMesh(cube); primitives.forEach(p => createProjectionOverlayForMesh(p)); updateProjectionTexOnOverlays(); }
+
+  function updateProjectionOverlaysWithProjector(active){
+    const list = [cube].concat(primitives);
+    if (!active){ list.forEach(m=>{ const o=projectionOverlays.get(m); if (o) o.material.uniforms.uProjStrength.value = 0.0; }); return; }
+    const P = new THREE.Matrix4().multiplyMatrices(active.camera.projectionMatrix, active.camera.matrixWorldInverse);
+    list.forEach(m=>{ const o = projectionOverlays.get(m); if (o){ o.material.uniforms.uProjMatrix.value.copy(P); o.material.uniforms.uProjTex.value = contentTexture || new THREE.Texture(); o.material.uniforms.uProjStrength.value = 1.0; } });
+  }
+
+  const _exportState = { meshMaterials: new Map(), gridVisible:true, axesVisible:true, helperVis:new Map() };
+
+  function prepareSceneForExport(){
+    _exportState.gridVisible = gridHelper ? gridHelper.visible : true;
+    _exportState.axesVisible = axesHelper ? axesHelper.visible : true;
+    if (gridHelper) gridHelper.visible = false;
+    if (axesHelper) axesHelper.visible = false;
+    projectors.forEach(p => { if (!p.helper) return; Object.keys(p.helper).forEach(k=>{ const o=p.helper[k]; if (!o) return; _exportState.helperVis.set(o.uuid, o.visible); o.visible = false; }); });
+    const blackMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    [cube].concat(primitives).forEach(m => { if (!m) return; _exportState.meshMaterials.set(m.uuid, m.material); m.material = blackMat; });
+  }
+  function restoreSceneAfterExport(){
+    if (gridHelper) gridHelper.visible = _exportState.gridVisible;
+    if (axesHelper) axesHelper.visible = _exportState.axesVisible;
+    projectors.forEach(p => { if (!p.helper) return; Object.keys(p.helper).forEach(k=>{ const o=p.helper[k]; if (!o) return; const prev=_exportState.helperVis.get(o.uuid); if (typeof prev !== 'undefined') o.visible = prev; }); });
+    _exportState.helperVis.clear();
+    [cube].concat(primitives).forEach(m => { if (!m) return; const prev=_exportState.meshMaterials.get(m.uuid); if (prev){ m.material = prev; _exportState.meshMaterials.delete(m.uuid); } });
+    updateProjectionTexOnOverlays();
+  }
+
+  function getActiveProjector(){ const use = document.getElementById('useProj') && document.getElementById('useProj').checked; if (!use) return null; return projectors[0] || null; }
+
+  // export helpers
+  let _exportRendererCache = null;
+  async function createExportRendererForSize(w,h){
+    if (_exportRendererCache && _exportRendererCache.w===w && _exportRendererCache.h===h) return _exportRendererCache;
+    if (_exportRendererCache){ try{ _exportRendererCache.exportRenderer.dispose(); _exportRendererCache.canvas.remove(); }catch(e){} _exportRendererCache=null; }
+    const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h; canvas.style.display='none'; document.body.appendChild(canvas);
+    const exportRenderer = new THREE.WebGLRenderer({ canvas, antialias:true, preserveDrawingBuffer:true });
+    exportRenderer.outputEncoding = renderer.outputEncoding; exportRenderer.toneMapping = renderer.toneMapping; exportRenderer.toneMappingExposure = renderer.toneMappingExposure;
+    exportRenderer.setSize(w,h); exportRenderer.setPixelRatio(1);
+    _exportRendererCache = { exportRenderer, canvas, w, h }; return _exportRendererCache;
+  }
+
+  async function startExport(){
+    const res = document.getElementById('exportRes').value;
+    const exportW = res==='4k'?3840:(res==='1080p'?1920:800);
+    const exportH = res==='4k'?2160:(res==='1080p'?1080:1280);
+    miniLog(`Export ${exportW}x${exportH}`);
+    prepareSceneForExport();
+    try{
+      const cache = await createExportRendererForSize(exportW, exportH);
+      const er = cache.exportRenderer; const canvas = cache.canvas; const zip = new JSZip();
+      const p = projectors[0];
+      if (p){
+        const prevAspect = p.camera.aspect; p.camera.aspect = exportW/exportH; p.camera.updateProjectionMatrix();
+        er.render(scene, p.camera);
+        await new Promise(r => requestAnimationFrame(r));
+        await new Promise(resolve => canvas.toBlob(b => { if (b) zip.file('proj_frame.png', b); resolve(); }, 'image/png'));
+        p.camera.aspect = prevAspect; p.camera.updateProjectionMatrix();
+      }
+      er.render(scene, camera);
+      await new Promise(r => requestAnimationFrame(r));
+      await new Promise(resolve => canvas.toBlob(b => { if (b) zip.file('main_frame.png', b); resolve(); }, 'image/png'));
+      const out = await zip.generateAsync({ type: 'blob' });
+      saveAs(out, `export_${Date.now()}.zip`);
+      miniLog('Export ZIP downloaded');
+    }catch(e){ miniLog('Export error: ' + (e && e.message)); }
+    finally { restoreSceneAfterExport(); }
+  }
+
+  // create projector: mark visible + pick invisible + cone hidden
+  function createProjector(x=0,y=2.5,z=10,label='Proj_1'){
+    const g = new THREE.Group(); g.position.set(x,y,z); scene.add(g);
+    const mark = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 8), new THREE.MeshStandardMaterial({ color: 0x0dd6b6, emissive:0x0dd6b6 }));
+    mark.position.set(0,0,0); mark.renderOrder = 1000; g.add(mark);
+    const pick = new THREE.Mesh(new THREE.BoxGeometry(1.2,1.2,1.6), new THREE.MeshBasicMaterial({ color:0x00ff00, transparent:true, opacity:0.0 }));
+    pick.renderOrder = 1001; pick.position.set(0,0,0); g.add(pick);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.35,0.9,16), new THREE.MeshStandardMaterial({ color:0x0d9488 }));
+    cone.rotation.x = Math.PI; cone.position.set(0,-0.2,-0.5); cone.visible = false; g.add(cone);
+    const cam = new THREE.PerspectiveCamera(45, 9/16, 0.5, 500); cam.position.copy(g.position);
+    const p = { id:0, label, group:g, camera:cam, rtPreview:null, orientation:'portrait', helper:{ mark, pick, cone } };
+    projectors = [p];
+    interactiveObjects.push(pick);
+    return p;
+  }
+
+  // UI helpers
+  function appendObjectListUI(mesh, name){
+    const wrapper = document.createElement('div'); wrapper.className='list-item';
+    const label = document.createElement('div'); label.textContent = name || mesh.name || 'Object';
+    const controls = document.createElement('div');
+    const sel = document.createElement('button'); sel.textContent='Select'; sel.onclick = ()=>{ selectObjectMesh(mesh); transformControl.attach(mesh); transformControl.setSpace('local'); updateMetricsUI(); };
+    const del = document.createElement('button'); del.textContent='Delete'; del.onclick = ()=>{ removePrimitive(mesh); };
+    controls.appendChild(sel); controls.appendChild(del);
+    wrapper.appendChild(label); wrapper.appendChild(controls);
+    document.getElementById('object-list').appendChild(wrapper);
+    mesh._listItem = wrapper;
+  }
+
+  function registerProjectorUI(p){
+    const el=document.getElementById('projector-list'); el.innerHTML=''; const wrapper=document.createElement('div'); wrapper.className='list-item';
+    const label=document.createElement('div'); label.textContent = p.label || 'Projector';
+    const controls=document.createElement('div'); const sel=document.createElement('button'); sel.textContent='Select'; sel.onclick = ()=>{ selectProjector(p); transformControl.attach(p.group); transformControl.setSpace('local'); updateMetricsUI(); };
+    controls.appendChild(sel); wrapper.appendChild(label); wrapper.appendChild(controls); el.appendChild(wrapper); p._listItem = wrapper;
+    // show top-bar orientation control and sync value
+    const orientSel = document.getElementById('projOrient');
+    if (orientSel){ orientSel.style.display = ''; orientSel.value = p.orientation || 'portrait'; }
+  }
+
+  function setProjectorOrientationUIFromTopBar(){
+    const orientSel = document.getElementById('projOrient');
+    const p = projectors[0];
+    if (!orientSel || !p) return;
+    setProjectorOrientation(p, orientSel.value);
+  }
+
+  function setProjectorOrientation(p, mode){
+    if (!p || !p.camera) return;
+    p.orientation = mode;
+    p.camera.aspect = (mode === 'portrait') ? (9/16) : (16/9);
+    p.camera.updateProjectionMatrix();
+
+    // Resize preview RT and preview canvas
+    try {
+      const previewCanvas = document.getElementById('preview1');
+      if (previewCanvas && p.rtPreview) {
+        const previewCssW = 200;
+        const previewWpx = Math.max(1, Math.floor(previewCssW * dpr));
+        const previewHpx = Math.max(1, Math.floor(previewWpx / p.camera.aspect));
+        p.rtPreview.setSize(previewWpx, previewHpx);
+        previewCanvas.width = previewWpx;
+        previewCanvas.height = previewHpx;
+        previewCanvas.style.width = previewCssW + 'px';
+        previewCanvas.style.height = Math.round(previewHpx / dpr) + 'px';
+      }
+    } catch (err) { console.warn('Preview RT resize failed', err); }
+
+    if (selected && selected.type === 'projector' && selected.obj === p) {
+      enterProjectorViewForProjector(p);
+    }
+    updateProjectionOverlaysWithProjector(getActiveProjector());
+    miniLog(`${p.label || 'projector'} set to ${mode}`);
+  }
+
+  function selectObjectMesh(mesh){ selected = { type:'object', obj: mesh }; miniLog('Selected object (mesh)'); updateMetricsUI(); updateSizeInfo(mesh); }
+  function selectProjector(p){ selected = { type:'projector', obj: p }; miniLog(`Selected projector ${p.label}`); updateMetricsUI(); }
+
+  function updateMetricsUI(){
+    const nameEl=document.getElementById('metric-name'), xEl=document.getElementById('metric-x'), yEl=document.getElementById('metric-y'), zEl=document.getElementById('metric-z');
+    const rxEl=document.getElementById('metric-rotx'), ryEl=document.getElementById('metric-roty'), rzEl=document.getElementById('metric-rotz');
+    if (!selected){ nameEl.value=''; xEl.value=''; yEl.value=''; zEl.value=''; rxEl.value=''; ryEl.value=''; rzEl.value=''; return; }
+    if (selected.type==='object'){ const m=selected.obj; nameEl.value=m.name||'Object'; xEl.value=m.position.x.toFixed(3); yEl.value=m.position.y.toFixed(3); zEl.value=m.position.z.toFixed(3); const e=new THREE.Euler().setFromQuaternion(m.quaternion,'XYZ'); rxEl.value=THREE.Math.radToDeg(e.x).toFixed(2); ryEl.value=THREE.Math.radToDeg(e.y).toFixed(2); rzEl.value=THREE.Math.radToDeg(e.z).toFixed(2); } else { const p=selected.obj; nameEl.value=p.label||p.id; xEl.value=p.group.position.x.toFixed(3); yEl.value=p.group.position.y.toFixed(3); zEl.value=p.group.position.z.toFixed(3); const e=new THREE.Euler().setFromQuaternion(p.group.quaternion,'XYZ'); rxEl.value=THREE.Math.radToDeg(e.x).toFixed(2); ryEl.value=THREE.Math.radToDeg(e.y).toFixed(2); rzEl.value=THREE.Math.radToDeg(e.z).toFixed(2); }
+  }
+
+  function updateSizeInfo(mesh){
+    try{ const box=new THREE.Box3().setFromObject(mesh); const size=new THREE.Vector3(); box.getSize(size); miniLog(`Size: ${size.x.toFixed(3)} × ${size.y.toFixed(3)} × ${size.z.toFixed(3)} m`); }catch(e){}
+  }
+
+  function setupMetricKeyboard(){ ['metric-x','metric-y','metric-z','metric-rotx','metric-roty','metric-rotz'].forEach(id=>{ const el=document.getElementById(id); el && el.addEventListener('keydown',evt=>{ if(evt.key==='ArrowUp'||evt.key==='ArrowDown'){ evt.preventDefault(); const step=evt.shiftKey?0.1:0.01; let val=parseFloat(el.value||'0'); if(isNaN(val)) val=0; val += (evt.key==='ArrowUp'?step:-step); el.value=val.toFixed(3); } else if(evt.key==='Enter'){ applyMetricsUI(); } }); }); }
+
+  function setupTransformControlEvents(){
+    transformControl.addEventListener('dragging-changed', (e)=> { orbit.enabled = !e.value; });
+    transformControl.addEventListener('change', ()=> {
+      updateMetricsUI();
+      if (selected && selected.type === 'projector' && selected.obj){
+        const p = selected.obj;
+        p.camera.position.copy(p.group.position);
+        p.camera.quaternion.copy(p.group.quaternion);
+        p.camera.updateProjectionMatrix && p.camera.updateProjectionMatrix();
+        if (p.rtPreview){ renderer.setRenderTarget(p.rtPreview); renderer.clear(); renderer.render(scene,p.camera); renderer.setRenderTarget(null); drawPreviewFromRT(p.rtPreview, document.getElementById('preview1')); }
+      }
+      renderer.render(scene, camera);
+    });
+    transformControl.addEventListener('objectChange', ()=> { if (transformControl.object) { transformControl.updateMatrixWorld(); transformControl.object.updateMatrixWorld(); } });
+  }
+
+  function animate(){ requestAnimationFrame(animate); if (contentVideo && !contentVideo.paused) cube.rotation.y += 0.005; projectors.forEach(p=>{ p.camera.position.copy(p.group.position); p.camera.quaternion.copy(p.group.quaternion); }); updateProjectionOverlaysWithProjector(getActiveProjector()); renderPreviews(); renderer.setRenderTarget(null); renderer.clear(); renderer.render(scene,camera); }
+
+  function drawPreviewFromRT(rt, canvas){
+    const ctx = canvas.getContext('2d'); const w = rt.width, h = rt.height; const pixels = new Uint8Array(w*h*4);
+    try{ renderer.readRenderTargetPixels(rt,0,0,w,h,pixels); const out=new Uint8ClampedArray(w*h*4); for(let y=0;y<h;y++){ const src=y*w*4; const dst=(h-1-y)*w*4; out.set(pixels.subarray(src,src+w*4),dst); } if (canvas.width !== w || canvas.height !== h){ canvas.width = w; canvas.height = h; } ctx.putImageData(new ImageData(out,w,h),0,0); }catch(e){ ctx.clearRect(0,0,canvas.width,canvas.height); }
+  }
+
+  function renderPreviews(){ const p=projectors[0], canvas=document.getElementById('preview1'); if (!p || !p.rtPreview || !canvas) return; const prevPick = p.helper.pick.visible; p.helper.pick.visible = false; renderer.setRenderTarget(p.rtPreview); renderer.clear(); renderer.render(scene,p.camera); renderer.setRenderTarget(null); p.helper.pick.visible = prevPick; drawPreviewFromRT(p.rtPreview, canvas); }
+
+  async function uploadContent(){
+    const input=document.createElement('input'); input.type='file'; input.accept='image/*,video/*';
+    input.onchange=async(e)=>{ const f=e.target.files[0]; if(!f) return; const url=URL.createObjectURL(f); miniLog('Loaded: '+f.name);
+      if(f.type.startsWith('video/')){ const v=document.createElement('video'); v.src=url; v.crossOrigin='anonymous'; v.loop=false; v.muted=true; v.playsInline=true; await v.play().catch(()=>{}); v.pause(); contentVideo=v; contentTexture=new THREE.VideoTexture(v); contentTexture.minFilter=THREE.LinearFilter; contentTexture.magFilter=THREE.LinearFilter; contentTexture.encoding=THREE.sRGBEncoding; cube.material=new THREE.MeshBasicMaterial({map:contentTexture}); contentTexture.needsUpdate=true; miniLog('Loaded video: '+f.name+' dur='+v.duration+'s'); applyProjectionToScene(); } else { const img=new Image(); img.crossOrigin='anonymous'; img.onload=()=>{ contentTexture=new THREE.Texture(img); contentTexture.needsUpdate=true; cube.material=new THREE.MeshBasicMaterial({map:contentTexture}); miniLog('Loaded image: '+f.name); applyProjectionToScene(); }; img.src=url; }
+    };
+    input.click();
+  }
+
+  // recording
+  let isRecording=false,_videoEndedHandler=null; const mediaRecsArr=[], lastRecordedBlobs={proj:null,main:null};
+  async function startRecordingStreams(){ if(isRecording) return; prepareSceneForExport(); isRecording=true; document.getElementById('recordBtn').textContent='⏹️ Stop'; mediaRecsArr.length=0; lastRecordedBlobs.proj=null; lastRecordedBlobs.main=null; if(contentVideo){ try{ contentVideo.currentTime=0; }catch(e){} _videoEndedHandler=()=>{ miniLog('Video ended — stopping recording'); stopRecordingStreams(); }; contentVideo.addEventListener('ended',_videoEndedHandler); await contentVideo.play().catch(e=>miniLog('play fail:'+e)); } const p=projectors[0]; if(p && p.rtPreview){ renderer.setRenderTarget(p.rtPreview); renderer.clear(); renderer.render(scene,p.camera); renderer.setRenderTarget(null); drawPreviewFromRT(p.rtPreview,document.getElementById('preview1')); } renderer.setRenderTarget(null); renderer.clear(); renderer.render(scene,camera);
+    try{ const projCanvas=document.getElementById('preview1'); const s=projCanvas.captureStream(30); const mr=new MediaRecorder(s,{mimeType:'video/webm;codecs=vp8'}); const chunks=[]; mr.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); }; mr.onstop=()=>{ lastRecordedBlobs.proj=new Blob(chunks,{type:chunks[0]?.type||'video/webm'}); miniLog(`Preview recording ready (${lastRecordedBlobs.proj.size} B)`); }; mr.start(); mediaRecsArr.push({name:'proj',rec:mr,chunks}); }catch(e){ miniLog('Preview recorder error:'+e); }
+    try{ const s2=renderer.domElement.captureStream(30); const mr2=new MediaRecorder(s2,{mimeType:'video/webm;codecs=vp8'}); const chunks2=[]; mr2.ondataavailable=e=>{ if(e.data && e.data.size) chunks2.push(e.data); }; mr2.onstop=()=>{ lastRecordedBlobs.main=new Blob(chunks2,{type:chunks2[0]?.type||'video/webm'}); miniLog(`Main recording ready (${lastRecordedBlobs.main.size} B)`); }; mr2.start(); mediaRecsArr.push({name:'main',rec:mr2,chunks:chunks2}); }catch(e){ miniLog('Main recorder error:'+e); }
+    miniLog('Recording started'); }
+  function stopRecordingStreams(){ if(!isRecording) return; isRecording=false; document.getElementById('recordBtn').textContent='🔴 Record'; mediaRecsArr.forEach(en=>{ try{ en.rec.stop(); }catch(e){} }); mediaRecsArr.length=0; if(_videoEndedHandler&&contentVideo){ try{ contentVideo.removeEventListener('ended',_videoEndedHandler); }catch(e){} _videoEndedHandler=null; } setTimeout(()=>{ restoreSceneAfterExport(); miniLog('Recording stopped — scene restored'); },250); }
+  function toggleRecording(){ if(isRecording) stopRecordingStreams(); else startRecordingStreams(); }
+  function downloadLast(kind){ const b=lastRecordedBlobs[kind]; if(!b) return alert('No recording'); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download = kind+'_rec.webm'; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
+
+  // pointers / selection
+  let pointerDownInfo=null;
+  function onPointerDown(e){ pointerDownInfo={x:e.clientX,y:e.clientY,rect:renderer.domElement.getBoundingClientRect()}; }
+  function onPointerUp(e){
+    const rect = pointerDownInfo?.rect || renderer.domElement.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    const pointer = new THREE.Vector2(x,y);
+    const ray = new THREE.Raycaster(); ray.setFromCamera(pointer,camera);
+    const hits = ray.intersectObjects(interactiveObjects, true);
+    if (hits.length>0){
+      const hit = hits[0].object;
+      const proj = projectors.find(p=>{ let cur = hit; while(cur){ if(cur===p.group) return true; cur = cur.parent; } return false; });
+      if (proj){ selectProjector(proj); setTimeout(()=>{ transformControl.attach(proj.group); transformControl.setSpace('local'); updateMetricsUI(); },0); return; }
+      let mesh = hit; while(mesh && interactiveObjects.indexOf(mesh)===-1) mesh = mesh.parent;
+      if (mesh){ selectObjectMesh(mesh); setTimeout(()=>{ transformControl.attach(mesh); transformControl.setSpace('local'); updateMetricsUI(); },0); return; }
+    } else {
+      transformControl.detach(); selected=null; exitProjectorView(); updateMetricsUI();
+    }
+  }
+
+  // init
+  function initScene(){
+    scene = new THREE.Scene(); scene.background = new THREE.Color(0x0a0a0a);
+    camera = new THREE.PerspectiveCamera(50,(window.innerWidth-500)/(window.innerHeight-92),0.1,1000); camera.position.set(15,10,15);
+    renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true }); renderer.setSize(window.innerWidth-500,window.innerHeight-92); document.getElementById('main-viewport').appendChild(renderer.domElement);
+    orbit = new THREE.OrbitControls(camera, renderer.domElement); orbit.enableDamping = true;
+    gridHelper = new THREE.GridHelper(100,100,0x444444,0x222222); scene.add(gridHelper);
+    axesHelper = new THREE.AxesHelper(5); scene.add(axesHelper);
+    transformControl = new THREE.TransformControls(camera, renderer.domElement); scene.add(transformControl);
+    setupTransformControlEvents(); setupMetricKeyboard();
+    const ambient = new THREE.AmbientLight(0x404040,0.6); scene.add(ambient); const dir = new THREE.DirectionalLight(0xffffff,0.6); dir.position.set(10,20,10); scene.add(dir);
+    const geom = new THREE.BoxGeometry(4,6,4); const mat = new THREE.MeshStandardMaterial({ color:0x888888 }); cube = new THREE.Mesh(geom,mat); cube.position.set(0,3,0); scene.add(cube); interactiveObjects.push(cube); appendObjectListUI(cube,'Cube');
+    const p = createProjector(0,2.5,10,'Proj_1'); p.orientation='portrait'; p.camera.aspect=9/16; p.camera.updateProjectionMatrix();
+    const cnv = document.getElementById('preview1'); cnv.width = Math.max(1, Math.floor(200*dpr)); cnv.height = Math.max(1, Math.floor(150*dpr));
+    p.rtPreview = new THREE.WebGLRenderTarget(cnv.width, cnv.height, { minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter, format:THREE.RGBAFormat });
+    registerProjectorUI(p);
+    const orientSel = document.getElementById('projOrient');
+    orientSel && orientSel.addEventListener('change', setProjectorOrientationUIFromTopBar);
+    orientSel && (orientSel.style.display = projectors.length ? '' : 'none');
+    document.getElementById('addBox').addEventListener('click', ()=> addPrimitive('box'));
+    document.getElementById('metric-apply').addEventListener('click', applyMetricsUI);
+    window.addEventListener('resize', ()=>{ renderer.setSize(window.innerWidth - 500, window.innerHeight - 92); camera.aspect = (window.innerWidth - 500) / (window.innerHeight - 92); camera.updateProjectionMatrix(); });
+    renderer.domElement.addEventListener('pointerdown', onPointerDown); renderer.domElement.addEventListener('pointerup', onPointerUp);
+    animate(); miniLog('Scene ready — v22 fixed (projector mark visible; orientation affects projector)');
+  }
+
+  function addPrimitive(type){ let mesh; if (type==='box') mesh = new THREE.Mesh(new THREE.BoxGeometry(2,2,2), new THREE.MeshStandardMaterial({ color: 0x6b8cff })); else mesh = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), new THREE.MeshStandardMaterial({ color:0x888888 })); mesh.position.set(Math.random()*4-2,1,Math.random()*4-2); scene.add(mesh); primitives.push(mesh); interactiveObjects.push(mesh); appendObjectListUI(mesh,type); createProjectionOverlayForMesh(mesh); miniLog(type+' added'); }
+
+  // start everything
+  initScene();
+
+  // exposes
+  window.uploadContent = uploadContent;
+  window.toggleRecording = toggleRecording;
+  window.startExport = startExport;
+  window.downloadLast = downloadLast;
+  window.togglePlay = () => { if (!contentVideo) return alert('Load video'); if (contentVideo.paused) { contentVideo.play().catch(()=>{}); document.getElementById('btnPlay').textContent='❚❚ Pause'; miniLog('Video playing'); } else { contentVideo.pause(); document.getElementById('btnPlay').textContent='► Play'; miniLog('Video paused'); } };
+  </script>
+</body>
+</html>
